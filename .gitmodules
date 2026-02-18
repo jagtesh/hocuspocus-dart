@@ -1,0 +1,3 @@
+[submodule "vendor/hocuspocus"]
+	path = vendor/hocuspocus
+	url = https://github.com/ueberdosis/hocuspocus.git

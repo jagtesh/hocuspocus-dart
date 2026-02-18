@@ -1,0 +1,6 @@
+# https://dart.dev/guides/language/analysis-options
+include: package:lints/recommended.yaml
+
+analyzer:
+  errors:
+    avoid_dynamic_calls: ignore
