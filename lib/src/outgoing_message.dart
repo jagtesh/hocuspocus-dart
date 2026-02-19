@@ -5,7 +5,7 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:yjs_dart/src/lib0/encoding.dart' as encoding;
+import 'package:yjs_dart/yjs_dart.dart' as encoding;
 
 import 'types.dart';
 

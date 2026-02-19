@@ -22,6 +22,7 @@ export 'src/message_receiver.dart';
 export 'src/outgoing_message.dart';
 export 'src/outgoing_messages/authentication_message.dart';
 export 'src/outgoing_messages/awareness_message.dart';
+export 'src/outgoing_messages/close_message.dart';
 export 'src/outgoing_messages/query_awareness_message.dart';
 export 'src/outgoing_messages/stateless_message.dart';
 export 'src/outgoing_messages/sync_step_one_message.dart';

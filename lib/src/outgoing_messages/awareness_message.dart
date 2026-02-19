@@ -3,8 +3,8 @@
 /// Mirrors: hocuspocus v2.12.3 packages/provider/src/OutgoingMessages/AwarenessMessage.ts
 library;
 
-import 'package:yjs_dart/src/lib0/encoding.dart' as encoding;
-import 'package:yjs_dart/src/protocols/awareness.dart' show encodeAwarenessUpdate;
+import 'package:yjs_dart/yjs_dart.dart' as encoding;
+import 'package:yjs_dart/yjs_dart.dart' show encodeAwarenessUpdate;
 
 import '../outgoing_message.dart';
 import '../types.dart';

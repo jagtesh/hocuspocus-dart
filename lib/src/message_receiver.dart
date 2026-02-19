@@ -3,15 +3,16 @@
 /// Mirrors: hocuspocus v2.12.3 packages/provider/src/MessageReceiver.ts
 library;
 
-import 'dart:typed_data';
-
-import 'package:yjs_dart/src/lib0/decoding.dart' as decoding;
-import 'package:yjs_dart/src/lib0/encoding.dart' as encoding;
-import 'package:yjs_dart/src/protocols/awareness.dart' show applyAwarenessUpdate, encodeAwarenessUpdate;
-import 'package:yjs_dart/src/protocols/sync.dart' show readSyncMessage, messageSyncStep2;
+import 'package:yjs_dart/yjs_dart.dart' as decoding;
+import 'package:yjs_dart/yjs_dart.dart'
+    show
+        applyAwarenessUpdate,
+        encodeAwarenessUpdate,
+        readSyncMessage,
+        messageSyncStep2;
+import 'package:yjs_dart/yjs_dart.dart' show Doc;
 
 import 'incoming_message.dart';
-import 'outgoing_message.dart';
 import 'types.dart';
 
 /// Dispatches an incoming binary message to the appropriate handler.
@@ -86,7 +87,7 @@ class MessageReceiver {
     message.writeVarUint(MessageType.sync.value);
 
     // ignore: avoid_dynamic_calls
-    final doc = provider.document;
+    final doc = provider.document as Doc;
     final syncMessageType = readSyncMessage(
       message.decoder,
       message.encoder,
@@ -117,7 +118,10 @@ class MessageReceiver {
   }
 
   void _applyAuthMessage(dynamic provider) {
-    // Auth message: read the auth type
+    // Auth message format (hocuspocus-specific, superset of y-protocols/auth):
+    //   0 = permission denied  → string reason
+    //   1 = authenticated      → string scope
+    //   2 = token required     → (no payload)
     final authType = decoding.readVarUint(message.decoder);
     switch (authType) {
       case 0: // permission denied

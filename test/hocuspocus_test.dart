@@ -1,12 +1,75 @@
 /// Tests for hocuspocus-dart: MessageType, IncomingMessage, HocuspocusProvider.
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:hocuspocus_dart/hocuspocus_dart.dart';
+import 'package:stream_channel/stream_channel.dart';
 import 'package:test/test.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:yjs_dart/src/lib0/encoding.dart' as encoding;
 import 'package:yjs_dart/src/utils/doc.dart' show Doc;
+
+// ---------------------------------------------------------------------------
+// Minimal fake WebSocket provider for tests that need send-tracking.
+// ---------------------------------------------------------------------------
+
+class _FakeWsProvider extends HocuspocusProviderWebsocket {
+  final List<Uint8List> sent = [];
+
+  _FakeWsProvider()
+      : super(HocuspocusProviderWebsocketConfiguration(url: 'ws://test'));
+
+  @override
+  Future<void> connect() async {} // never connect to a real server in tests
+
+  @override
+  void send(Uint8List data) => sent.add(data);
+}
+
+// ---------------------------------------------------------------------------
+// Mock WebSocketChannel for timeout testing.
+// ---------------------------------------------------------------------------
+
+class _MockWebSocketChannel extends StreamChannelMixin<dynamic>
+    implements WebSocketChannel {
+  @override
+  final Stream<dynamic> stream;
+  @override
+  final WebSocketSink sink;
+  @override
+  final Future<void> ready;
+
+  _MockWebSocketChannel({
+    Stream<dynamic>? stream,
+    WebSocketSink? sink,
+    required this.ready,
+  })  : stream = stream ?? const Stream.empty(),
+        sink = sink ?? _MockWebSocketSink();
+
+  @override
+  String? get protocol => null;
+
+  @override
+  int? get closeCode => null;
+
+  @override
+  String? get closeReason => null;
+}
+
+class _MockWebSocketSink implements WebSocketSink {
+  @override
+  void add(dynamic data) {}
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) {}
+  @override
+  Future addStream(Stream<dynamic> stream) async {}
+  @override
+  Future close([int? closeCode, String? closeReason]) async {}
+  @override
+  Future get done => Future.value();
+}
 
 void main() {
   // ---------------------------------------------------------------------------
@@ -77,13 +140,26 @@ void main() {
       msg.writeVarUint(1);
       expect(msg.length(), greaterThan(before));
     });
+
+    test('peekVarString reads without consuming bytes', () {
+      final enc = encoding.createEncoder();
+      encoding.writeVarString(enc, 'my-document');
+      final bytes = encoding.toUint8Array(enc);
+
+      final msg = IncomingMessage(bytes);
+      final peeked = msg.peekVarString();
+      expect(peeked, equals('my-document'));
+      // Decoder position unchanged — read again returns same value
+      expect(msg.readVarString(), equals('my-document'));
+    });
   });
 
   // ---------------------------------------------------------------------------
   // Outgoing messages
   // ---------------------------------------------------------------------------
   group('OutgoingMessages', () {
-    test('AuthenticationMessage serializes documentName + auth type + token', () {
+    test('AuthenticationMessage serializes documentName + auth type + token',
+        () {
       final msg = AuthenticationMessage(
         documentName: 'test-doc',
         token: 'my-token',
@@ -98,7 +174,8 @@ void main() {
       expect(incoming.readVarString(), equals('my-token'));
     });
 
-    test('StatelessMessage serializes documentName + stateless type + payload', () {
+    test('StatelessMessage serializes documentName + stateless type + payload',
+        () {
       final msg = StatelessMessage(
         documentName: 'test-doc',
         payload: 'hello world',
@@ -110,14 +187,106 @@ void main() {
       expect(incoming.readVarString(), equals('hello world'));
     });
 
-    test('QueryAwarenessMessage serializes documentName + queryAwareness type', () {
+    test(
+        'QueryAwarenessMessage serializes documentName + queryAwareness type',
+        () {
       final msg = QueryAwarenessMessage(documentName: 'test-doc');
       final bytes = msg.toUint8Array();
       final incoming = IncomingMessage(bytes);
       expect(incoming.readVarString(), equals('test-doc'));
       expect(incoming.readVarUint(), equals(MessageType.queryAwareness.value));
     });
+
+    test('CloseMessage serializes documentName + close type', () {
+      final msg = CloseMessage(documentName: 'test-doc');
+      final bytes = msg.toUint8Array();
+      final incoming = IncomingMessage(bytes);
+      expect(incoming.readVarString(), equals('test-doc'));
+      expect(incoming.readVarUint(), equals(MessageType.close.value));
+    });
   });
+
+  // ---------------------------------------------------------------------------
+  // HocuspocusProviderWebsocketConfiguration
+  // ---------------------------------------------------------------------------
+  group('HocuspocusProviderWebsocketConfiguration', () {
+    test('resolvedUrl returns url unchanged when no parameters', () {
+      final config = HocuspocusProviderWebsocketConfiguration(
+        url: 'ws://localhost:1234',
+      );
+      expect(config.resolvedUrl, equals('ws://localhost:1234'));
+    });
+
+    test('resolvedUrl strips trailing slash', () {
+      final config = HocuspocusProviderWebsocketConfiguration(
+        url: 'ws://localhost:1234/',
+      );
+      expect(config.resolvedUrl, equals('ws://localhost:1234'));
+    });
+
+    test('resolvedUrl appends encoded query parameters', () {
+      final config = HocuspocusProviderWebsocketConfiguration(
+        url: 'ws://localhost:1234',
+        parameters: {'room': 'my doc', 'v': '2'},
+      );
+      final resolved = config.resolvedUrl;
+      expect(resolved, startsWith('ws://localhost:1234?'));
+      expect(resolved, contains('room=my%20doc'));
+      expect(resolved, contains('v=2'));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // HocuspocusProviderWebsocket - Connect Timeout
+  // ---------------------------------------------------------------------------
+  group('HocuspocusProviderWebsocket', () {
+    test('connect succeeds if ready completes within timeout', () async {
+      final completer = Completer<void>();
+      final config = HocuspocusProviderWebsocketConfiguration(
+        url: 'ws://localhost:1234',
+        connectTimeout: 100,
+      );
+      
+      final provider = HocuspocusProviderWebsocket(
+        config,
+        socketFactory: (uri) => _MockWebSocketChannel(ready: completer.future),
+      );
+
+      // Start connecting
+      final future = provider.connect();
+      
+      // Complete ready immediately
+      completer.complete();
+      
+      await future;
+      expect(provider.status, equals(WebSocketStatus.connected));
+      
+      // Cleanup
+      provider.destroy();
+    });
+
+    test('connect fails if ready times out', () async {
+      final completer = Completer<void>();
+      final config = HocuspocusProviderWebsocketConfiguration(
+        url: 'ws://localhost:1234',
+        connectTimeout: 50, // Short timeout
+      );
+      
+      final provider = HocuspocusProviderWebsocket(
+        config,
+        socketFactory: (uri) => _MockWebSocketChannel(ready: completer.future),
+      );
+
+      // Start connecting
+      await provider.connect();
+      
+      // connection attempt should have failed and called _onClose
+      expect(provider.status, equals(WebSocketStatus.disconnected));
+      
+      provider.destroy();
+    });
+  });
+
 
   // ---------------------------------------------------------------------------
   // HocuspocusProvider
@@ -127,7 +296,8 @@ void main() {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
         ),
       );
       expect(provider.document, isNotNull);
@@ -140,7 +310,8 @@ void main() {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
           document: doc,
         ),
       );
@@ -152,7 +323,8 @@ void main() {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
         ),
       );
       expect(provider.synced, isFalse);
@@ -163,7 +335,8 @@ void main() {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
         ),
       );
       var emitted = false;
@@ -173,11 +346,27 @@ void main() {
       provider.destroy();
     });
 
+    test('synced setter also emits sync alias event', () {
+      final provider = HocuspocusProvider(
+        HocuspocusProviderConfiguration(
+          name: 'test',
+          url: 'ws://localhost:1234',
+          autoConnect: false,
+        ),
+      );
+      var syncEmitted = false;
+      provider.on('sync', (_) => syncEmitted = true);
+      provider.synced = true;
+      expect(syncEmitted, isTrue);
+      provider.destroy();
+    });
+
     test('incrementUnsyncedChanges / decrementUnsyncedChanges', () {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
         ),
       );
       expect(provider.hasUnsyncedChanges, isFalse);
@@ -192,7 +381,8 @@ void main() {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
         ),
       );
       String? received;
@@ -208,7 +398,8 @@ void main() {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
         ),
       );
       String? reason;
@@ -220,11 +411,28 @@ void main() {
       provider.destroy();
     });
 
-    test('authenticatedHandler sets isAuthenticated and emits authenticated', () {
+    test('permissionDeniedHandler resets isAuthenticated', () {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
+        ),
+      );
+      // Manually set authenticated state
+      provider.isAuthenticated = true;
+      provider.permissionDeniedHandler('denied');
+      expect(provider.isAuthenticated, isFalse);
+      provider.destroy();
+    });
+
+    test('authenticatedHandler sets isAuthenticated and emits authenticated',
+        () {
+      final provider = HocuspocusProvider(
+        HocuspocusProviderConfiguration(
+          name: 'test',
+          url: 'ws://localhost:1234',
+          autoConnect: false,
         ),
       );
       String? scope;
@@ -238,11 +446,91 @@ void main() {
       provider.destroy();
     });
 
+    test('sendToken is a no-op when token is null', () {
+      final fake = _FakeWsProvider();
+      final provider = HocuspocusProvider(
+        HocuspocusProviderConfiguration(
+          name: 'test',
+          websocketProvider: fake,
+          autoConnect: false,
+          // token: null (default)
+        ),
+      );
+      final countBefore = fake.sent.length;
+      provider.sendToken();
+      expect(fake.sent.length, equals(countBefore),
+          reason: 'No message should be sent when token is null');
+      provider.destroy();
+    });
+
+    test('sendToken sends message when token is set', () async {
+      final fake = _FakeWsProvider();
+      final provider = HocuspocusProvider(
+        HocuspocusProviderConfiguration(
+          name: 'test',
+          websocketProvider: fake,
+          autoConnect: false,
+          token: () => 'secret',
+        ),
+      );
+      final countBefore = fake.sent.length;
+      await provider.sendToken();
+      expect(fake.sent.length, greaterThan(countBefore));
+      // Verify the sent bytes decode as an AuthenticationMessage
+      final incoming = IncomingMessage(fake.sent.last);
+      expect(incoming.readVarString(), equals('test')); // documentName
+      expect(incoming.readVarUint(), equals(MessageType.auth.value));
+      expect(incoming.readVarString(), equals('secret')); // token
+      provider.destroy();
+    });
+
+    test('sendToken awaits async token', () async {
+      final fake = _FakeWsProvider();
+      final provider = HocuspocusProvider(
+        HocuspocusProviderConfiguration(
+          name: 'test',
+          websocketProvider: fake,
+          autoConnect: false,
+          token: () async {
+            await Future.delayed(Duration(milliseconds: 10));
+            return 'async-secret';
+          },
+        ),
+      );
+      final countBefore = fake.sent.length;
+      await provider.sendToken();
+      expect(fake.sent.length, greaterThan(countBefore));
+      
+      final incoming = IncomingMessage(fake.sent.last);
+      expect(incoming.readVarString(), equals('test'));
+      expect(incoming.readVarUint(), equals(MessageType.auth.value));
+      expect(incoming.readVarString(), equals('async-secret'));
+      provider.destroy();
+    });
+
+    test('outgoingMessage event is emitted on send', () {
+      final fake = _FakeWsProvider();
+      final provider = HocuspocusProvider(
+        HocuspocusProviderConfiguration(
+          name: 'test',
+          websocketProvider: fake,
+          autoConnect: false,
+          token: () => 'tok',
+        ),
+      );
+      var outgoingFired = false;
+      provider.on('outgoingMessage', (_) => outgoingFired = true);
+      provider.sendStateless('hello');
+      expect(outgoingFired, isTrue);
+      provider.destroy();
+    });
+
     test('destroy cleans up without throwing', () {
       final provider = HocuspocusProvider(
         HocuspocusProviderConfiguration(
           name: 'test',
-          url: 'ws://localhost:1234', autoConnect: false,
+          url: 'ws://localhost:1234',
+          autoConnect: false,
         ),
       );
       expect(() => provider.destroy(), returnsNormally);

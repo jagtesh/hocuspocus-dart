@@ -3,19 +3,18 @@
 /// Mirrors: hocuspocus v2.12.3 packages/provider/src/HocuspocusProvider.ts
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:yjs_dart/src/lib0/observable.dart';
-import 'package:yjs_dart/src/protocols/awareness.dart'
-    show Awareness, removeAwarenessStates;
-import 'package:yjs_dart/src/utils/doc.dart' show Doc;
-import 'package:yjs_dart/src/utils/updates.dart' show encodeStateAsUpdate;
+import 'package:yjs_dart/yjs_dart.dart'
+    show Awareness, removeAwarenessStates, Doc, Observable;
 
 import 'hocuspocus_provider_websocket.dart';
 import 'incoming_message.dart';
 import 'message_receiver.dart';
 import 'outgoing_messages/authentication_message.dart';
 import 'outgoing_messages/awareness_message.dart';
+import 'outgoing_messages/close_message.dart';
 import 'outgoing_messages/stateless_message.dart';
 import 'outgoing_messages/sync_step_one_message.dart';
 import 'outgoing_messages/update_message.dart';
@@ -34,7 +33,9 @@ class HocuspocusProviderConfiguration {
   final Awareness? awareness;
 
   /// Authentication token (or null for no auth).
-  final String? token;
+  ///
+  /// Can be a static string or a function returning a Future.
+  final FutureOr<String?> Function()? token;
 
   /// Shared WebSocket provider. If not provided, one is created from [url].
   final HocuspocusProviderWebsocket? websocketProvider;
@@ -45,11 +46,16 @@ class HocuspocusProviderConfiguration {
   /// Force sync interval in milliseconds, or null to disable.
   final int? forceSyncInterval;
 
+  /// Connection timeout in milliseconds (default: 10000).
+  final int connectTimeout;
+
   // Callbacks
   final void Function(OnAuthenticatedParams)? onAuthenticated;
   final void Function(OnAuthenticationFailedParams)? onAuthenticationFailed;
   final void Function(OnOpenParams)? onOpen;
   final void Function()? onConnect;
+  final void Function(OnMessageParams)? onMessage;
+  final void Function(OnOutgoingMessageParams)? onOutgoingMessage;
   final void Function(OnStatusParams)? onStatus;
   final void Function(OnSyncedParams)? onSynced;
   final void Function(OnDisconnectParams)? onDisconnect;
@@ -71,11 +77,14 @@ class HocuspocusProviderConfiguration {
     this.websocketProvider,
     this.url,
     this.forceSyncInterval,
+    this.connectTimeout = 10000,
     this.autoConnect = true,
     this.onAuthenticated,
     this.onAuthenticationFailed,
     this.onOpen,
     this.onConnect,
+    this.onMessage,
+    this.onOutgoingMessage,
     this.onStatus,
     this.onSynced,
     this.onDisconnect,
@@ -107,6 +116,7 @@ class HocuspocusProvider extends Observable<String> {
   AuthorizedScope? authorizedScope;
   int _unsyncedChanges = 0;
   bool _manageSocket = false;
+  Timer? _forceSyncTimer;
 
   HocuspocusProvider(this.configuration) {
     // Set up document
@@ -125,7 +135,10 @@ class HocuspocusProvider extends Observable<String> {
     } else {
       _manageSocket = true;
       _wsProvider = HocuspocusProviderWebsocket(
-        HocuspocusProviderWebsocketConfiguration(url: configuration.url!),
+        HocuspocusProviderWebsocketConfiguration(
+          url: configuration.url!,
+          connectTimeout: configuration.connectTimeout,
+        ),
       );
     }
 
@@ -136,7 +149,8 @@ class HocuspocusProvider extends Observable<String> {
     }
     if (configuration.onAuthenticationFailed != null) {
       on('authenticationFailed', (args) =>
-          configuration.onAuthenticationFailed!(args[0] as OnAuthenticationFailedParams));
+          configuration.onAuthenticationFailed!(
+              args[0] as OnAuthenticationFailedParams));
     }
     if (configuration.onSynced != null) {
       on('synced', (args) =>
@@ -151,15 +165,27 @@ class HocuspocusProvider extends Observable<String> {
     }
     if (configuration.onUnsyncedChanges != null) {
       on('unsyncedChanges', (args) =>
-          configuration.onUnsyncedChanges!(args[0] as OnUnsyncedChangesParams));
+          configuration.onUnsyncedChanges!(
+              args[0] as OnUnsyncedChangesParams));
     }
     if (configuration.onAwarenessUpdate != null) {
       on('awarenessUpdate', (args) =>
-          configuration.onAwarenessUpdate!(args[0] as OnAwarenessUpdateParams));
+          configuration.onAwarenessUpdate!(
+              args[0] as OnAwarenessUpdateParams));
     }
     if (configuration.onAwarenessChange != null) {
       on('awarenessChange', (args) =>
-          configuration.onAwarenessChange!(args[0] as OnAwarenessChangeParams));
+          configuration.onAwarenessChange!(
+              args[0] as OnAwarenessChangeParams));
+    }
+    if (configuration.onMessage != null) {
+      on('message', (args) =>
+          configuration.onMessage!(args[0] as OnMessageParams));
+    }
+    if (configuration.onOutgoingMessage != null) {
+      on('outgoingMessage', (args) =>
+          configuration.onOutgoingMessage!(
+              args[0] as OnOutgoingMessageParams));
     }
 
     // Awareness listeners
@@ -170,11 +196,13 @@ class HocuspocusProvider extends Observable<String> {
       final removed = (changed['removed'] as List?)?.cast<int>() ?? [];
       final changedClients = [...added, ...updated, ...removed];
       _sendAwareness(changedClients);
-      emit('awarenessUpdate', [OnAwarenessUpdateParams(_awarenessStatesArray())]);
+      emit('awarenessUpdate',
+          [OnAwarenessUpdateParams(_awarenessStatesArray())]);
     });
 
     awareness?.on('change', (dynamic _, [dynamic __]) {
-      emit('awarenessChange', [OnAwarenessChangeParams(_awarenessStatesArray())]);
+      emit('awarenessChange',
+          [OnAwarenessChangeParams(_awarenessStatesArray())]);
     });
 
     // Document update listener
@@ -186,7 +214,8 @@ class HocuspocusProvider extends Observable<String> {
     _wsProvider.on('close', _onWsClose);
     _wsProvider.on('connect', ([dynamic _]) => emit('connect', []));
     _wsProvider.on('disconnect', (dynamic code, [dynamic reason]) {
-      emit('disconnect', [OnDisconnectParams(code as int, (reason ?? '') as String)]);
+      emit('disconnect',
+          [OnDisconnectParams(code as int, (reason ?? '') as String)]);
     });
     _wsProvider.on('status', (dynamic s, [dynamic __]) {
       emit('status', [OnStatusParams(s as WebSocketStatus)]);
@@ -195,7 +224,10 @@ class HocuspocusProvider extends Observable<String> {
 
     // Force sync interval
     if (configuration.forceSyncInterval != null) {
-      // Dart timers are set up in connect()
+      _forceSyncTimer = Timer.periodic(
+        Duration(milliseconds: configuration.forceSyncInterval!),
+        (_) => forceSync(),
+      );
     }
 
     if (_manageSocket && configuration.autoConnect) {
@@ -214,6 +246,7 @@ class HocuspocusProvider extends Observable<String> {
     _isSynced = state;
     if (state) {
       emit('synced', [OnSyncedParams(true)]);
+      emit('sync', [OnSyncedParams(true)]); // backward-compat alias
     }
   }
 
@@ -341,7 +374,12 @@ class HocuspocusProvider extends Observable<String> {
   // ---------------------------------------------------------------------------
 
   Future<void> sendToken() async {
-    final token = configuration.token ?? '';
+    final tokenFunc = configuration.token;
+    if (tokenFunc == null) return;
+
+    final token = await tokenFunc();
+    if (token == null || token.isEmpty) return;
+
     _sendMessage(AuthenticationMessage(
       documentName: configuration.name,
       token: token,
@@ -349,7 +387,9 @@ class HocuspocusProvider extends Observable<String> {
   }
 
   void permissionDeniedHandler(String reason) {
+    isAuthenticated = false;
     emit('authenticationFailed', [OnAuthenticationFailedParams(reason)]);
+    disconnect();
   }
 
   void authenticatedHandler(String scope) {
@@ -388,6 +428,7 @@ class HocuspocusProvider extends Observable<String> {
   // ---------------------------------------------------------------------------
 
   void _sendMessage(dynamic message) {
+    emit('outgoingMessage', [OnOutgoingMessageParams(message)]);
     // ignore: avoid_dynamic_calls
     _wsProvider.send(message.toUint8Array() as Uint8List);
   }
@@ -405,6 +446,13 @@ class HocuspocusProvider extends Observable<String> {
 
   @override
   void destroy() {
+    // Cancel periodic timers before disconnect
+    _forceSyncTimer?.cancel();
+    _forceSyncTimer = null;
+
+    // Gracefully tell the server we're closing
+    _sendMessage(CloseMessage(documentName: configuration.name));
+
     emit('destroy', []);
 
     final aw = awareness;

@@ -7,7 +7,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:yjs_dart/src/lib0/observable.dart';
+import 'package:yjs_dart/yjs_dart.dart' show Observable;
 
 import 'types.dart';
 
@@ -28,13 +28,38 @@ class HocuspocusProviderWebsocketConfiguration {
   /// Timeout for reconnect if no message received (ms, default: 30000).
   final int messageReconnectTimeout;
 
+  /// URL query parameters appended to the WebSocket URL.
+  ///
+  /// Keys and values are percent-encoded automatically.
+  final Map<String, String> parameters;
+
+  /// Timeout for connection attempts in milliseconds (default: 10000).
+  final int connectTimeout;
+
   const HocuspocusProviderWebsocketConfiguration({
     required this.url,
     this.minDelay = 1000,
     this.maxDelay = 30000,
     this.maxRetries = -1,
     this.messageReconnectTimeout = 30000,
+    this.parameters = const {},
+    this.connectTimeout = 10000,
   });
+
+  /// Returns the URL with [parameters] encoded as a query string.
+  String get resolvedUrl {
+    if (parameters.isEmpty) {
+      // Strip trailing slash to match JS behaviour
+      final u = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+      return u;
+    }
+    final base = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+    final query = parameters.entries
+        .map((e) =>
+            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    return '$base?$query';
+  }
 }
 
 /// Manages the WebSocket connection with automatic reconnect.
@@ -54,7 +79,15 @@ class HocuspocusProviderWebsocket extends Observable<String> {
   int _retryCount = 0;
   bool _destroyed = false;
 
-  HocuspocusProviderWebsocket(this.configuration);
+  /// Messages queued while the connection is being established.
+  final List<Uint8List> _messageQueue = [];
+
+  final WebSocketChannel Function(Uri) _socketFactory;
+
+  HocuspocusProviderWebsocket(
+    this.configuration, {
+    WebSocketChannel Function(Uri)? socketFactory,
+  }) : _socketFactory = socketFactory ?? ((uri) => WebSocketChannel.connect(uri));
 
   WebSocketStatus get status => _status;
 
@@ -64,13 +97,16 @@ class HocuspocusProviderWebsocket extends Observable<String> {
   Future<void> connect() async {
     if (_destroyed) return;
     if (_status == WebSocketStatus.connecting ||
-        _status == WebSocketStatus.connected) return;
+        _status == WebSocketStatus.connected) {
+      return;
+    }
 
     _setStatus(WebSocketStatus.connecting);
 
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(configuration.url));
-      await _channel!.ready;
+      _channel = _socketFactory(Uri.parse(configuration.resolvedUrl));
+      await _channel!.ready
+          .timeout(Duration(milliseconds: configuration.connectTimeout));
       _onOpen();
     } catch (e) {
       _onClose(1006, 'Connection failed: $e');
@@ -99,6 +135,12 @@ class HocuspocusProviderWebsocket extends Observable<String> {
       onError: (e) => _onClose(1006, 'Error: $e'),
     );
 
+    // Flush queued messages now that we're connected
+    for (final msg in _messageQueue) {
+      _channel?.sink.add(msg);
+    }
+    _messageQueue.clear();
+
     emit('open', []);
     emit('connect', []);
   }
@@ -108,6 +150,9 @@ class HocuspocusProviderWebsocket extends Observable<String> {
     _subscription = null;
     _messageReconnectTimer?.cancel();
     _messageReconnectTimer = null;
+
+    // Drop messages that were queued for a connection that never completed
+    _messageQueue.clear();
 
     final wasConnected = _status == WebSocketStatus.connected;
     _setStatus(WebSocketStatus.disconnected);
@@ -157,15 +202,24 @@ class HocuspocusProviderWebsocket extends Observable<String> {
   }
 
   /// Send raw bytes over the WebSocket.
+  ///
+  /// - If connected, sends immediately.
+  /// - If connecting, queues the message and flushes on open.
+  /// - If disconnected, drops the message.
   void send(Uint8List data) {
-    if (_status != WebSocketStatus.connected) return;
-    _channel?.sink.add(data);
+    if (_status == WebSocketStatus.connected) {
+      _channel?.sink.add(data);
+    } else if (_status == WebSocketStatus.connecting) {
+      _messageQueue.add(data);
+    }
+    // Disconnected: drop silently (no server to receive it)
   }
 
   /// Disconnect from the server (will not reconnect).
   void disconnect() {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _messageQueue.clear();
     _channel?.sink.close();
   }
 
@@ -175,6 +229,7 @@ class HocuspocusProviderWebsocket extends Observable<String> {
     _reconnectTimer?.cancel();
     _messageReconnectTimer?.cancel();
     _subscription?.cancel();
+    _messageQueue.clear();
     _channel?.sink.close();
     emit('destroy', []);
     super.destroy();

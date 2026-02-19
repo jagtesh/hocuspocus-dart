@@ -3,7 +3,7 @@
 /// Mirrors: hocuspocus v2.12.3 packages/provider/src/OutgoingMessages/StatelessMessage.ts
 library;
 
-import 'package:yjs_dart/src/lib0/encoding.dart' as encoding;
+import 'package:yjs_dart/yjs_dart.dart' as encoding;
 
 import '../outgoing_message.dart';
 import '../types.dart';

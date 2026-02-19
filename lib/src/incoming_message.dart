@@ -5,8 +5,8 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:yjs_dart/src/lib0/decoding.dart' as decoding;
-import 'package:yjs_dart/src/lib0/encoding.dart' as encoding;
+import 'package:yjs_dart/yjs_dart.dart' as decoding;
+import 'package:yjs_dart/yjs_dart.dart' as encoding;
 
 /// Wraps a raw WebSocket message with a decoder for reading and an encoder
 /// for building a reply.
@@ -40,6 +40,14 @@ class IncomingMessage {
   /// Write a variable-length byte array to the reply encoder.
   void writeVarUint8Array(Uint8List bytes) =>
       encoding.writeVarUint8Array(encoder, bytes);
+
+  /// Peek a variable-length string without advancing the decoder position.
+  ///
+  /// Mirrors: `peekVarString` in IncomingMessage.ts / lib0/decoding.js
+  String peekVarString() {
+    final clone = decoding.clone(decoder);
+    return decoding.readVarString(clone);
+  }
 
   /// Number of bytes written to the reply encoder so far.
   int length() => encoding.toUint8Array(encoder).length;

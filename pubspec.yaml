@@ -1,7 +1,7 @@
 name: hocuspocus_dart
-description: A pure Dart port of the hocuspocus WebSocket provider for Yjs CRDT collaboration.
-version: 0.1.0
-repository: https://github.com/jagtesh/hocuspocus-dart
+description: A pure Dart port of the Hocuspocus WebSocket provider for Yjs CRDT collaboration.
+version: 1.0.0
+homepage: https://github.com/jagtesh/hocuspocus-dart
 
 # Pinned to hocuspocus JS v2.12.3 (vendor/hocuspocus)
 
@@ -10,9 +10,9 @@ environment:
 
 dependencies:
   web_socket_channel: ^3.0.0
-  yjs_dart:
-    path: ../yjs-dart
+  yjs_dart: ^1.1.2
 
 dev_dependencies:
   lints: ^4.0.0
   test: ^1.24.0
+  stream_channel: ^2.1.0

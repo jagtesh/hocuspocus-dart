@@ -3,8 +3,8 @@
 /// Mirrors: hocuspocus v2.12.3 packages/provider/src/OutgoingMessages/SyncStepOneMessage.ts
 library;
 
-import 'package:yjs_dart/src/lib0/encoding.dart' as encoding;
-import 'package:yjs_dart/src/protocols/sync.dart' show writeSyncStep1;
+import 'package:yjs_dart/yjs_dart.dart' as encoding;
+import 'package:yjs_dart/yjs_dart.dart' show writeSyncStep1;
 
 import '../outgoing_message.dart';
 import '../types.dart';
