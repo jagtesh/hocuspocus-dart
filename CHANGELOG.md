@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+-   **Fix**: Updated the `yjs_dart` package source to point to `pub.dev`. 
+
 ## 1.0.1
 
 -   **Fix**: `SyncStepOneMessage` was wrapping the sync payload in `writeVarUint8Array`, prepending a spurious length byte. The server saw this as an unknown sync sub-tag (3) and rejected it. Fixed to write the payload directly via `writeSyncStep1`.
