@@ -131,8 +131,12 @@ class HocuspocusProviderWebsocket extends Observable<String> {
         }
         emit('message', [bytes]);
       },
-      onDone: () => _onClose(1000, 'Connection closed'),
-      onError: (e) => _onClose(1006, 'Error: $e'),
+      onDone: () { 
+        _onClose(1000, 'Connection closed');
+      },
+      onError: (e) {
+        _onClose(1006, 'Error: $e');
+      },
     );
 
     // Flush queued messages now that we're connected

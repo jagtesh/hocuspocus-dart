@@ -143,49 +143,51 @@ class HocuspocusProvider extends Observable<String> {
     }
 
     // Register callbacks
+    // Note: Observable.emit calls Function.apply(f, args), so listeners receive
+    // args spread as positional parameters (not as a list).
     if (configuration.onAuthenticated != null) {
-      on('authenticated', (args) =>
-          configuration.onAuthenticated!(args[0] as OnAuthenticatedParams));
+      on('authenticated', (dynamic p) =>
+          configuration.onAuthenticated!(p as OnAuthenticatedParams));
     }
     if (configuration.onAuthenticationFailed != null) {
-      on('authenticationFailed', (args) =>
+      on('authenticationFailed', (dynamic p) =>
           configuration.onAuthenticationFailed!(
-              args[0] as OnAuthenticationFailedParams));
+              p as OnAuthenticationFailedParams));
     }
     if (configuration.onSynced != null) {
-      on('synced', (args) =>
-          configuration.onSynced!(args[0] as OnSyncedParams));
+      on('synced', (dynamic p) =>
+          configuration.onSynced!(p as OnSyncedParams));
     }
     if (configuration.onDestroy != null) {
       on('destroy', (_) => configuration.onDestroy!());
     }
     if (configuration.onStateless != null) {
-      on('stateless', (args) =>
-          configuration.onStateless!(args[0] as OnStatelessParams));
+      on('stateless', (dynamic p) =>
+          configuration.onStateless!(p as OnStatelessParams));
     }
     if (configuration.onUnsyncedChanges != null) {
-      on('unsyncedChanges', (args) =>
+      on('unsyncedChanges', (dynamic p) =>
           configuration.onUnsyncedChanges!(
-              args[0] as OnUnsyncedChangesParams));
+              p as OnUnsyncedChangesParams));
     }
     if (configuration.onAwarenessUpdate != null) {
-      on('awarenessUpdate', (args) =>
+      on('awarenessUpdate', (dynamic p) =>
           configuration.onAwarenessUpdate!(
-              args[0] as OnAwarenessUpdateParams));
+              p as OnAwarenessUpdateParams));
     }
     if (configuration.onAwarenessChange != null) {
-      on('awarenessChange', (args) =>
+      on('awarenessChange', (dynamic p) =>
           configuration.onAwarenessChange!(
-              args[0] as OnAwarenessChangeParams));
+              p as OnAwarenessChangeParams));
     }
     if (configuration.onMessage != null) {
-      on('message', (args) =>
-          configuration.onMessage!(args[0] as OnMessageParams));
+      on('message', (dynamic p) =>
+          configuration.onMessage!(p as OnMessageParams));
     }
     if (configuration.onOutgoingMessage != null) {
-      on('outgoingMessage', (args) =>
+      on('outgoingMessage', (dynamic p) =>
           configuration.onOutgoingMessage!(
-              args[0] as OnOutgoingMessageParams));
+              p as OnOutgoingMessageParams));
     }
 
     // Awareness listeners
@@ -291,7 +293,7 @@ class HocuspocusProvider extends Observable<String> {
     MessageReceiver(message).apply(this, true);
   }
 
-  void _onWsClose([dynamic _]) {
+  void _onWsClose(dynamic code, [dynamic reason]) {
     isAuthenticated = false;
     synced = false;
 
@@ -334,14 +336,16 @@ class HocuspocusProvider extends Observable<String> {
   // Document update handler
   // ---------------------------------------------------------------------------
 
-  void _documentUpdateHandler(dynamic updateArg, [dynamic origin]) {
-    final update = updateArg as Uint8List;
+  // doc.emit('update', [update, origin, doc, transaction])
+  void _documentUpdateHandler(dynamic update,
+      [dynamic origin, dynamic doc, dynamic transaction]) {
+    final updateBytes = update as Uint8List;
     if (identical(origin, this)) return;
 
     incrementUnsyncedChanges();
     _sendMessage(UpdateMessage(
       documentName: configuration.name,
-      update: update,
+      update: updateBytes,
     ));
   }
 
@@ -430,7 +434,8 @@ class HocuspocusProvider extends Observable<String> {
   void _sendMessage(dynamic message) {
     emit('outgoingMessage', [OnOutgoingMessageParams(message)]);
     // ignore: avoid_dynamic_calls
-    _wsProvider.send(message.toUint8Array() as Uint8List);
+    final bytes = message.toUint8Array() as Uint8List;
+    _wsProvider.send(bytes);
   }
 
   /// Send raw bytes (used by MessageReceiver for replies).

@@ -27,8 +27,12 @@ class MessageReceiver {
   ///
   /// If [emitSynced] is true, emits the 'synced' event when SyncStep2 is received.
   void apply(dynamic provider, bool emitSynced) {
-    final type = MessageType.fromValue(message.readVarUint());
+    final msgTypeInt = message.readVarUint();
+    final type = MessageType.fromValue(msgTypeInt);
     final emptyMessageLength = message.length();
+    
+    // ignore: avoid_print
+    // print('DEBUG: MessageReceiver apply type=$type ($msgTypeInt)');
 
     switch (type) {
       case MessageType.sync:
@@ -88,6 +92,7 @@ class MessageReceiver {
 
     // ignore: avoid_dynamic_calls
     final doc = provider.document as Doc;
+    // print('DEBUG: MessageReceiver _applySyncMessage doc=${doc.guid}');
     final syncMessageType = readSyncMessage(
       message.decoder,
       message.encoder,

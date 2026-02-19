@@ -22,9 +22,8 @@ class SyncStepOneMessage extends OutgoingMessage {
   }) {
     encoding.writeVarString(encoder, documentName);
     encoding.writeVarUint(encoder, MessageType.sync.value);
-    // writeSyncStep1 takes a lib0 encoding.Encoder and writes the state vector
-    final syncEncoder = encoding.createEncoder();
-    writeSyncStep1(syncEncoder, document);
-    encoding.writeVarUint8Array(encoder, encoding.toUint8Array(syncEncoder));
+    // writeSyncStep1 writes [messageSyncStep1, stateVector...] — must be written
+    // directly (no length prefix) so the server sees the sub-tag immediately.
+    writeSyncStep1(encoder, document);
   }
 }
