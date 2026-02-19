@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+-   **Fix**: Updated the `yjs_dart` package source to point to `pub.dev`.
+
 ## 1.0.2
 
 -   **Fix**: Updated the `yjs_dart` package source to point to `pub.dev`. 
