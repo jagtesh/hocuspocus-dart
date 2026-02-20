@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.6
+
+-   **Dependency**: Upgraded `yjs_dart` to `^1.1.13` to resolve the `RangeError (index): Index out of range` and out-of-bounds crashes during WebSocket sync due to RleEncoder byte misalignments.
 ## 1.0.5
 
 -   **Dependency**: Upgraded `yjs_dart` to `^1.1.12` to include the `YText.insert` CRDT duplication patch.
