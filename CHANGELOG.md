@@ -1,6 +1,8 @@
 # Changelog
 
-## 1.0.4
+## 1.0.5
+
+-   **Dependency**: Upgraded `yjs_dart` to `^1.1.12` to include the `YText.insert` CRDT duplication patch.
 
 -   **Dep**: Bumped minimum `yjs_dart` dependency to `^1.1.11` to include `YArray` offline sync capabilities, bug fixes, and exact-schema structure exports.
 
