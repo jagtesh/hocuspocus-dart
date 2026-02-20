@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.4
+
+-   **Dep**: Bumped minimum `yjs_dart` dependency to `^1.1.11` to include `YArray` offline sync capabilities, bug fixes, and exact-schema structure exports.
+
 ## 1.0.3
 
 -   **Fix**: Updated the `yjs_dart` package source to point to `pub.dev`.
