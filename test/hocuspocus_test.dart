@@ -71,6 +71,23 @@ class _MockWebSocketSink implements WebSocketSink {
   Future get done => Future.value();
 }
 
+class _CloseableMockWebSocketSink implements WebSocketSink {
+  _CloseableMockWebSocketSink(this.controller);
+
+  final StreamController<dynamic> controller;
+
+  @override
+  void add(dynamic data) {}
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) {}
+  @override
+  Future addStream(Stream<dynamic> stream) async {}
+  @override
+  Future close([int? closeCode, String? closeReason]) => controller.close();
+  @override
+  Future get done => controller.done;
+}
+
 void main() {
   // ---------------------------------------------------------------------------
   // MessageType
@@ -187,8 +204,7 @@ void main() {
       expect(incoming.readVarString(), equals('hello world'));
     });
 
-    test(
-        'QueryAwarenessMessage serializes documentName + queryAwareness type',
+    test('QueryAwarenessMessage serializes documentName + queryAwareness type',
         () {
       final msg = QueryAwarenessMessage(documentName: 'test-doc');
       final bytes = msg.toUint8Array();
@@ -246,7 +262,7 @@ void main() {
         url: 'ws://localhost:1234',
         connectTimeout: 100,
       );
-      
+
       final provider = HocuspocusProviderWebsocket(
         config,
         socketFactory: (uri) => _MockWebSocketChannel(ready: completer.future),
@@ -254,13 +270,13 @@ void main() {
 
       // Start connecting
       final future = provider.connect();
-      
+
       // Complete ready immediately
       completer.complete();
-      
+
       await future;
       expect(provider.status, equals(WebSocketStatus.connected));
-      
+
       // Cleanup
       provider.destroy();
     });
@@ -271,7 +287,7 @@ void main() {
         url: 'ws://localhost:1234',
         connectTimeout: 50, // Short timeout
       );
-      
+
       final provider = HocuspocusProviderWebsocket(
         config,
         socketFactory: (uri) => _MockWebSocketChannel(ready: completer.future),
@@ -279,14 +295,52 @@ void main() {
 
       // Start connecting
       await provider.connect();
-      
+
       // connection attempt should have failed and called _onClose
       expect(provider.status, equals(WebSocketStatus.disconnected));
-      
+
+      provider.destroy();
+    });
+
+    test('disconnect closes without scheduling a reconnect', () async {
+      var connectCount = 0;
+      StreamController<dynamic>? controller;
+      final config = HocuspocusProviderWebsocketConfiguration(
+        url: 'ws://localhost:1234',
+        minDelay: 20,
+        maxDelay: 20,
+      );
+
+      final provider = HocuspocusProviderWebsocket(
+        config,
+        socketFactory: (uri) {
+          connectCount++;
+          controller = StreamController<dynamic>();
+          return _MockWebSocketChannel(
+            stream: controller!.stream,
+            sink: _CloseableMockWebSocketSink(controller!),
+            ready: Future.value(),
+          );
+        },
+      );
+
+      await provider.connect();
+      expect(connectCount, equals(1));
+      expect(provider.status, equals(WebSocketStatus.connected));
+
+      provider.disconnect();
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(provider.status, equals(WebSocketStatus.disconnected));
+      expect(
+        connectCount,
+        equals(1),
+        reason: 'manual disconnect must not reconnect the socket',
+      );
+
       provider.destroy();
     });
   });
-
 
   // ---------------------------------------------------------------------------
   // HocuspocusProvider
@@ -374,6 +428,32 @@ void main() {
       expect(provider.hasUnsyncedChanges, isTrue);
       provider.decrementUnsyncedChanges();
       expect(provider.hasUnsyncedChanges, isFalse);
+      provider.destroy();
+    });
+
+    test('syncStatus acknowledgement clears unsynced changes', () {
+      final fake = _FakeWsProvider();
+      final provider = HocuspocusProvider(
+        HocuspocusProviderConfiguration(
+          name: 'doc',
+          websocketProvider: fake,
+          autoConnect: false,
+        ),
+      );
+
+      provider.startSync();
+      expect(provider.hasUnsyncedChanges, isTrue);
+
+      final enc = encoding.createEncoder();
+      encoding.writeVarString(enc, 'doc');
+      encoding.writeVarUint(enc, MessageType.syncStatus.value);
+      encoding.writeVarInt(enc, 1);
+
+      fake.emit('message', [encoding.toUint8Array(enc)]);
+
+      expect(provider.hasUnsyncedChanges, isFalse);
+      expect(provider.synced, isTrue);
+
       provider.destroy();
     });
 
@@ -500,7 +580,7 @@ void main() {
       final countBefore = fake.sent.length;
       await provider.sendToken();
       expect(fake.sent.length, greaterThan(countBefore));
-      
+
       final incoming = IncomingMessage(fake.sent.last);
       expect(incoming.readVarString(), equals('test'));
       expect(incoming.readVarUint(), equals(MessageType.auth.value));
@@ -769,16 +849,15 @@ void main() {
       // The server rejects any SyncStep1 that isn't exactly this format.
       // Observed real traffic: [7, 100, 101, 102, 97, 117, 108, 116, 0, 0, 1, 0]
       final doc = Doc();
-      final msg =
-          SyncStepOneMessage(documentName: 'default', document: doc);
+      final msg = SyncStepOneMessage(documentName: 'default', document: doc);
       final bytes = msg.toUint8Array();
       expect(bytes.length, equals(12));
-      expect(bytes[0], equals(7),  reason: 'varuint length of "default"');
-      expect(bytes[8], equals(0),  reason: 'MessageType.sync = 0');
-      expect(bytes[9], equals(0),  reason: 'messageSyncStep1 sub-tag = 0');
+      expect(bytes[0], equals(7), reason: 'varuint length of "default"');
+      expect(bytes[8], equals(0), reason: 'MessageType.sync = 0');
+      expect(bytes[9], equals(0), reason: 'messageSyncStep1 sub-tag = 0');
       expect(bytes[10], equals(1), reason: 'state vector length = 1 byte');
-      expect(bytes[11], equals(0), reason: 'state vector = varuint(0) = 0 clients');
+      expect(bytes[11], equals(0),
+          reason: 'state vector = varuint(0) = 0 clients');
     });
-
   });
 }

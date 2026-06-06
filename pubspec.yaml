@@ -1,6 +1,6 @@
 name: hocuspocus_dart
 description: A pure Dart port of the Hocuspocus WebSocket provider for Yjs CRDT collaboration.
-version: 1.0.6
+version: 1.0.7
 homepage: https://github.com/jagtesh/hocuspocus-dart
 
 # Pinned to hocuspocus JS v2.12.3 (vendor/hocuspocus)

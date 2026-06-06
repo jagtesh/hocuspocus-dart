@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7
+
+-   **Fix**: Manual `disconnect()` now closes the websocket without scheduling a reconnect.
+-   **Tests**: Added regressions for disconnect lifecycle and `syncStatus` acknowledgements clearing unsynced state.
+
 ## 1.0.6
 
 -   **Dependency**: Upgraded `yjs_dart` to `^1.1.13` to resolve the `RangeError (index): Index out of range` and out-of-bounds crashes during WebSocket sync due to RleEncoder byte misalignments.

@@ -78,6 +78,7 @@ class HocuspocusProviderWebsocket extends Observable<String> {
 
   int _retryCount = 0;
   bool _destroyed = false;
+  bool _shouldConnect = true;
 
   /// Messages queued while the connection is being established.
   final List<Uint8List> _messageQueue = [];
@@ -87,7 +88,8 @@ class HocuspocusProviderWebsocket extends Observable<String> {
   HocuspocusProviderWebsocket(
     this.configuration, {
     WebSocketChannel Function(Uri)? socketFactory,
-  }) : _socketFactory = socketFactory ?? ((uri) => WebSocketChannel.connect(uri));
+  }) : _socketFactory =
+            socketFactory ?? ((uri) => WebSocketChannel.connect(uri));
 
   WebSocketStatus get status => _status;
 
@@ -101,6 +103,7 @@ class HocuspocusProviderWebsocket extends Observable<String> {
       return;
     }
 
+    _shouldConnect = true;
     _setStatus(WebSocketStatus.connecting);
 
     try {
@@ -131,7 +134,7 @@ class HocuspocusProviderWebsocket extends Observable<String> {
         }
         emit('message', [bytes]);
       },
-      onDone: () { 
+      onDone: () {
         _onClose(1000, 'Connection closed');
       },
       onError: (e) {
@@ -166,7 +169,7 @@ class HocuspocusProviderWebsocket extends Observable<String> {
     }
     emit('close', [code, reason]);
 
-    if (!_destroyed) {
+    if (!_destroyed && _shouldConnect) {
       _scheduleReconnect();
     }
   }
@@ -221,6 +224,7 @@ class HocuspocusProviderWebsocket extends Observable<String> {
 
   /// Disconnect from the server (will not reconnect).
   void disconnect() {
+    _shouldConnect = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _messageQueue.clear();
@@ -230,6 +234,7 @@ class HocuspocusProviderWebsocket extends Observable<String> {
   @override
   void destroy() {
     _destroyed = true;
+    _shouldConnect = false;
     _reconnectTimer?.cancel();
     _messageReconnectTimer?.cancel();
     _subscription?.cancel();
